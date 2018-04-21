@@ -1,6 +1,5 @@
 /*
 	Copyright 2015 Benjamin Vedder	benjamin@vedder.se
-	Copyright 2017 Nico Ackermann	changed default hardware limits
 
 	This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -120,6 +119,8 @@
 #define HW_UART_RX_PIN			7
 
 // ICU Peripheral for servo decoding
+#define HW_ICU_TIMER			TIM3
+#define HW_ICU_TIM_CLK_EN()		RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM3, ENABLE)
 #define HW_ICU_DEV				ICUD3
 #define HW_ICU_CHANNEL			ICU_CHANNEL_2
 #define HW_ICU_GPIO_AF			GPIO_AF_TIM3
@@ -186,9 +187,9 @@
 #define READ_HALL3()			palReadPad(HW_HALL_ENC_GPIO3, HW_HALL_ENC_PIN3)
 
 // Setting limits
-#define HW_LIM_CURRENT			-120.0, 120.0
+#define HW_LIM_CURRENT			-100.0, 100.0
 #define HW_LIM_CURRENT_IN		-100.0, 100.0
-#define HW_LIM_CURRENT_ABS		0.0, 175.0
+#define HW_LIM_CURRENT_ABS		0.0, 150.0
 #define HW_LIM_VIN				6.0, 57.0
 #define HW_LIM_ERPM				-200e3, 200e3
 #define HW_LIM_DUTY_MIN			0.0, 0.1

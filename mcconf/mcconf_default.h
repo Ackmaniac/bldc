@@ -88,16 +88,19 @@
 #define MCCONF_L_CURR_MAX_RPM_FBRAKE_CC	1500	// Maximum electrical RPM to use full brake at with current control
 #endif
 #ifndef MCCONF_L_LIM_TEMP_FET_START
-#define MCCONF_L_LIM_TEMP_FET_START		80.0	// MOSFET temperature where current limiting should begin
+#define MCCONF_L_LIM_TEMP_FET_START		85.0	// MOSFET temperature where current limiting should begin
 #endif
 #ifndef MCCONF_L_LIM_TEMP_FET_END
 #define MCCONF_L_LIM_TEMP_FET_END		100.0	// MOSFET temperature where everything should be shut off
 #endif
 #ifndef MCCONF_L_LIM_TEMP_MOTOR_START
-#define MCCONF_L_LIM_TEMP_MOTOR_START	80.0	// MOTOR temperature where current limiting should begin
+#define MCCONF_L_LIM_TEMP_MOTOR_START	85.0	// MOTOR temperature where current limiting should begin
 #endif
 #ifndef MCCONF_L_LIM_TEMP_MOTOR_END
 #define MCCONF_L_LIM_TEMP_MOTOR_END		100.0	// MOTOR temperature where everything should be shut off
+#endif
+#ifndef MCCONF_L_LIM_TEMP_ACCEL_DEC
+#define MCCONF_L_LIM_TEMP_ACCEL_DEC		0.10	// Decrease temperature limits this much during acceleration
 #endif
 #ifndef MCCONF_L_WATT_MAX
 #define MCCONF_L_WATT_MAX				15000.0	// Maximum wattage output
@@ -108,13 +111,16 @@
 
 // Speed PID parameters
 #ifndef MCCONF_S_PID_KP
-#define MCCONF_S_PID_KP					0.003	// Proportional gain
+#define MCCONF_S_PID_KP					0.002	// Proportional gain
 #endif
 #ifndef MCCONF_S_PID_KI
-#define MCCONF_S_PID_KI					0.003	// Integral gain
+#define MCCONF_S_PID_KI					0.002	// Integral gain
 #endif
 #ifndef MCCONF_S_PID_KD
 #define MCCONF_S_PID_KD					0.0		// Derivative gain
+#endif
+#ifndef MCCONF_S_PID_KD_FILTER
+#define MCCONF_S_PID_KD_FILTER			0.2	// Derivative filter
 #endif
 #ifndef MCCONF_S_PID_MIN_RPM
 #define MCCONF_S_PID_MIN_RPM			900.0	// Minimum allowed RPM
@@ -132,6 +138,9 @@
 #endif
 #ifndef MCCONF_P_PID_KD
 #define MCCONF_P_PID_KD					0.0004	// Derivative gain
+#endif
+#ifndef MCCONF_P_PID_KD_FILTER
+#define MCCONF_P_PID_KD_FILTER			0.2		// Derivative filter
 #endif
 #ifndef MCCONF_P_PID_ANG_DIV
 #define MCCONF_P_PID_ANG_DIV			1.0		// Divide angle by this value
@@ -311,6 +320,9 @@
 #endif
 #ifndef MCCONF_FOC_TEMP_COMP_BASE_TEMP
 #define MCCONF_FOC_TEMP_COMP_BASE_TEMP	25.0	// Motor temperature compensation base temperature
+#endif
+#ifndef MCCONF_FOC_CURRENT_FILTER_CONST
+#define MCCONF_FOC_CURRENT_FILTER_CONST	0.1		// Filter constant for the filtered currents
 #endif
 
 // Misc

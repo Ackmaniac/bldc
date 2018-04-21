@@ -102,7 +102,7 @@
 #define NTC_TEMP(adc_ind)		0.0
 
 #define NTC_RES_MOTOR(adc_val)	(10000.0 / ((4095.0 / (float)adc_val) - 1.0)) // Motor temp sensor on low side
-#define NTC_TEMP_MOTOR()		0.0
+#define NTC_TEMP_MOTOR(beta)	0.0
 
 // Double samples in beginning and end for positive current measurement.
 // Useful when the shunt sense traces have noise that causes offset.
@@ -125,6 +125,8 @@
 #define HW_UART_RX_PIN			7
 
 // ICU Peripheral for servo decoding
+#define HW_ICU_TIMER			TIM4
+#define HW_ICU_TIM_CLK_EN()		RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM4, ENABLE)
 #define HW_ICU_DEV				ICUD4
 #define HW_ICU_CHANNEL			ICU_CHANNEL_1
 #define HW_ICU_GPIO_AF			GPIO_AF_TIM4

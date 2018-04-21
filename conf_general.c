@@ -88,6 +88,7 @@ void conf_general_get_default_app_configuration(app_configuration *conf) {
 	conf->timeout_brake_current = APPCONF_TIMEOUT_BRAKE_CURRENT;
 	conf->send_can_status = APPCONF_SEND_CAN_STATUS;
 	conf->send_can_status_rate_hz = APPCONF_SEND_CAN_STATUS_RATE_HZ;
+	conf->can_baud_rate = APPCONF_CAN_BAUD_RATE;
 
 	conf->app_to_use = APPCONF_APP_TO_USE;
 
@@ -202,6 +203,7 @@ void conf_general_get_default_mc_configuration(mc_configuration *conf) {
 	conf->l_temp_fet_end = MCCONF_L_LIM_TEMP_FET_END;
 	conf->l_temp_motor_start = MCCONF_L_LIM_TEMP_MOTOR_START;
 	conf->l_temp_motor_end = MCCONF_L_LIM_TEMP_MOTOR_END;
+	conf->l_temp_accel_dec = MCCONF_L_LIM_TEMP_ACCEL_DEC;
 	conf->l_min_duty = MCCONF_L_MIN_DUTY;
 	conf->l_max_duty = MCCONF_L_MAX_DUTY;
 	conf->l_watt_max = MCCONF_L_WATT_MAX;
@@ -268,16 +270,19 @@ void conf_general_get_default_mc_configuration(mc_configuration *conf) {
 	conf->foc_sat_comp = MCCONF_FOC_SAT_COMP;
 	conf->foc_temp_comp = MCCONF_FOC_TEMP_COMP;
 	conf->foc_temp_comp_base_temp = MCCONF_FOC_TEMP_COMP_BASE_TEMP;
+	conf->foc_current_filter_const = MCCONF_FOC_CURRENT_FILTER_CONST;
 
 	conf->s_pid_kp = MCCONF_S_PID_KP;
 	conf->s_pid_ki = MCCONF_S_PID_KI;
 	conf->s_pid_kd = MCCONF_S_PID_KD;
+	conf->s_pid_kd_filter = MCCONF_S_PID_KD_FILTER;
 	conf->s_pid_min_erpm = MCCONF_S_PID_MIN_RPM;
 	conf->s_pid_allow_braking = MCCONF_S_PID_ALLOW_BRAKING;
 
 	conf->p_pid_kp = MCCONF_P_PID_KP;
 	conf->p_pid_ki = MCCONF_P_PID_KI;
 	conf->p_pid_kd = MCCONF_P_PID_KD;
+	conf->p_pid_kd_filter = MCCONF_P_PID_KD_FILTER;
 	conf->p_pid_ang_div = MCCONF_P_PID_ANG_DIV;
 
 	conf->cc_startup_boost_duty = MCCONF_CC_STARTUP_BOOST_DUTY;

@@ -32,6 +32,7 @@
 #include "commands.h"
 #include "encoder.h"
 #include "drv8301.h"
+#include "drv8320.h"
 #include "buffer.h"
 #include <math.h>
 
@@ -139,6 +140,9 @@ void mc_interface_init(mc_configuration *configuration) {
 #ifdef HW_HAS_DRV8301
 	drv8301_set_oc_mode(configuration->m_drv8301_oc_mode);
 	drv8301_set_oc_adj(configuration->m_drv8301_oc_adj);
+#elif defined(HW_HAS_DRV8320)
+	drv8320_set_oc_mode(configuration->m_drv8301_oc_mode);
+	drv8320_set_oc_adj(configuration->m_drv8301_oc_adj);
 #endif
 
 	// Initialize encoder
@@ -203,6 +207,9 @@ void mc_interface_set_configuration(mc_configuration *configuration) {
 #ifdef HW_HAS_DRV8301
 	drv8301_set_oc_mode(configuration->m_drv8301_oc_mode);
 	drv8301_set_oc_adj(configuration->m_drv8301_oc_adj);
+#elif defined(HW_HAS_DRV8320)
+	drv8320_set_oc_mode(configuration->m_drv8301_oc_mode);
+	drv8320_set_oc_adj(configuration->m_drv8301_oc_adj);
 #endif
 
 	if (m_conf.motor_type == MOTOR_TYPE_FOC
@@ -418,14 +425,17 @@ void mc_interface_set_pid_pos(float pos) {
 
 	m_position_set = pos;
 
+	pos *= DIR_MULT;
+	utils_norm_angle(&pos);
+
 	switch (m_conf.motor_type) {
 	case MOTOR_TYPE_BLDC:
 	case MOTOR_TYPE_DC:
-		mcpwm_set_pid_pos(DIR_MULT * m_position_set);
+		mcpwm_set_pid_pos(pos);
 		break;
 
 	case MOTOR_TYPE_FOC:
-		mcpwm_foc_set_pid_pos(DIR_MULT * m_position_set);
+		mcpwm_foc_set_pid_pos(pos);
 		break;
 
 	default:
@@ -494,9 +504,15 @@ void mc_interface_set_current_rel(float val) {
  * The relative current value, range [0.0 1.0]
  */
 void mc_interface_set_brake_current_rel(float val) {
-	mc_interface_set_brake_current(val * m_conf.lo_current_motor_max_now);
+	mc_interface_set_brake_current(val * m_conf.lo_current_motor_min_now);
 }
 
+/**
+ * Set open loop current vector to brake motor.
+ *
+ * @param current
+ * The current value.
+ */
 void mc_interface_set_handbrake(float current) {
 	if (mc_interface_try_input()) {
 		return;
@@ -516,6 +532,16 @@ void mc_interface_set_handbrake(float current) {
 	default:
 		break;
 	}
+}
+
+/**
+ * Set handbrake brake current relative to the minimum current limit.
+ *
+ * @param current
+ * The relative current value, range [0.0 1.0]
+ */
+void mc_interface_set_handbrake_rel(float val) {
+	mc_interface_set_handbrake(val * fabsf(m_conf.lo_current_motor_min_now));
 }
 
 void mc_interface_brake_now(void) {
@@ -929,7 +955,10 @@ float mc_interface_get_pid_pos_now(void) {
 		break;
 	}
 
-	return DIR_MULT * ret;
+	ret *= DIR_MULT;
+	utils_norm_angle(&ret);
+
+	return ret;
 }
 
 float mc_interface_get_last_sample_adc_isr_duration(void) {
@@ -1054,6 +1083,10 @@ void mc_interface_fault_stop(mc_fault_code fault) {
 #ifdef HW_HAS_DRV8301
 		if (fault == FAULT_CODE_DRV) {
 			fdata.drv8301_faults = drv8301_read_faults();
+		}
+#elif defined(HW_HAS_DRV8320)
+		if (fault == FAULT_CODE_DRV) {
+			fdata.drv8301_faults = drv8320_read_faults();
 		}
 #endif
 		terminal_add_fault_data(&fdata);
@@ -1350,20 +1383,8 @@ static void update_override_limits(volatile mc_configuration *conf) {
 		lo_max_mos = 0.0;
 		mc_interface_fault_stop(FAULT_CODE_OVER_TEMP_FET);
 	} else {
-		float maxc = fabsf(conf->l_current_max);
-		if (fabsf(conf->l_current_min) > maxc) {
-			maxc = fabsf(conf->l_current_min);
-		}
-
-		maxc = utils_map(m_temp_fet, conf->l_temp_fet_start, conf->l_temp_fet_end, maxc, 0.0);
-
-		if (fabsf(conf->l_current_max) > maxc) {
-			lo_max_mos = SIGN(conf->l_current_max) * maxc;
-		}
-
-		if (fabsf(conf->l_current_min) > maxc) {
-			lo_min_mos = SIGN(conf->l_current_min) * maxc;
-		}
+		lo_min_mos = SIGN(conf->l_current_min) * utils_map(m_temp_fet, conf->l_temp_fet_start, conf->l_temp_fet_end, fabsf(conf->l_current_min), 0.0);
+		lo_max_mos = SIGN(conf->l_current_max) * utils_map(m_temp_fet, conf->l_temp_fet_start, conf->l_temp_fet_end, fabsf(conf->l_current_max), 0.0);
 	}
 
 	// Temperature MOTOR
@@ -1377,20 +1398,35 @@ static void update_override_limits(volatile mc_configuration *conf) {
 		lo_max_mot = 0.0;
 		mc_interface_fault_stop(FAULT_CODE_OVER_TEMP_MOTOR);
 	} else {
-		float maxc = fabsf(conf->l_current_max);
-		if (fabsf(conf->l_current_min) > maxc) {
-			maxc = fabsf(conf->l_current_min);
-		}
+		lo_min_mot = SIGN(conf->l_current_min) * utils_map(m_temp_motor, conf->l_temp_motor_start, conf->l_temp_motor_end, fabsf(conf->l_current_min), 0.0);
+		lo_max_mot = SIGN(conf->l_current_max) * utils_map(m_temp_motor, conf->l_temp_motor_start, conf->l_temp_motor_end, fabsf(conf->l_current_max), 0.0);
+	}
 
-		maxc = utils_map(m_temp_motor, conf->l_temp_motor_start, conf->l_temp_motor_end, maxc, 0.0);
+	// Decreased temperatures during acceleration
+	// in order to still have braking torque available
+	const float temp_fet_accel_start = utils_map(conf->l_temp_accel_dec, 0.0, 1.0, conf->l_temp_fet_start, 25.0);
+	const float temp_fet_accel_end = utils_map(conf->l_temp_accel_dec, 0.0, 1.0, conf->l_temp_fet_end, 25.0);
+	const float temp_motor_accel_start = utils_map(conf->l_temp_accel_dec, 0.0, 1.0, conf->l_temp_motor_start, 25.0);
+	const float temp_motor_accel_end = utils_map(conf->l_temp_accel_dec, 0.0, 1.0, conf->l_temp_motor_end, 25.0);
 
-		if (fabsf(conf->l_current_max) > maxc) {
-			lo_max_mot = SIGN(conf->l_current_max) * maxc;
-		}
+	float lo_fet_temp_accel = 0.0;
+	if (m_temp_fet < temp_fet_accel_start) {
+		lo_fet_temp_accel = conf->l_current_max;
+	} else if (m_temp_fet > temp_fet_accel_end) {
+		lo_fet_temp_accel = 0.0;
+	} else {
+		lo_fet_temp_accel = utils_map(m_temp_fet, temp_fet_accel_start,
+				temp_fet_accel_end, conf->l_current_max, 0.0);
+	}
 
-		if (fabsf(conf->l_current_min) > maxc) {
-			lo_min_mot = SIGN(conf->l_current_min) * maxc;
-		}
+	float lo_motor_temp_accel = 0.0;
+	if (m_temp_motor < temp_motor_accel_start) {
+		lo_motor_temp_accel = conf->l_current_max;
+	} else if (m_temp_motor > temp_motor_accel_end) {
+		lo_motor_temp_accel = 0.0;
+	} else {
+		lo_motor_temp_accel = utils_map(m_temp_motor, temp_motor_accel_start,
+				temp_motor_accel_end, conf->l_current_max, 0.0);
 	}
 
 	// RPM max
@@ -1422,6 +1458,8 @@ static void update_override_limits(volatile mc_configuration *conf) {
 
 	lo_max = utils_min_abs(lo_max, lo_max_rpm);
 	lo_max = utils_min_abs(lo_max, lo_min_rpm);
+	lo_max = utils_min_abs(lo_max, lo_fet_temp_accel);
+	lo_max = utils_min_abs(lo_max, lo_motor_temp_accel);
 
 	if (lo_max < conf->cc_min_current) {
 		lo_max = conf->cc_min_current;
@@ -1429,31 +1467,39 @@ static void update_override_limits(volatile mc_configuration *conf) {
 
 	if (lo_min > -conf->cc_min_current) {
 		lo_min = -conf->cc_min_current;
-	}						   
+	}
 
 	conf->lo_current_max = lo_max;
 	conf->lo_current_min = lo_min;
 
 	// Battery cutoff
-	float lo_in_max_batt = 0.0;
-	if (v_in > conf->l_battery_cut_start) {
-		lo_in_max_batt = conf->l_in_current_max;
-	} else if (v_in < conf->l_battery_cut_end) {
+	float lo_in_max_batt = conf->l_in_current_max;		
+	if (v_in < conf->l_battery_cut_end) {
 		lo_in_max_batt = 0.0;
-	} else {
+	} else if (v_in < conf->l_battery_cut_start){
 		lo_in_max_batt = utils_map(v_in, conf->l_battery_cut_start,
 				conf->l_battery_cut_end, conf->l_in_current_max, 0.0);
 	}
-
+	
+	//Battery max voltage
+	float lo_in_min_batt = conf->l_in_current_min;
+	if (v_in > conf->l_max_vin) {
+		lo_in_min_batt = -0.001;
+	}else if (v_in > conf->l_max_vin - 1.0) {
+		lo_in_min_batt = utils_map(v_in, conf->l_max_vin - 1.0,
+				conf->l_max_vin, conf->l_in_current_min, -0.001);
+	}
+	
 	// Wattage limits
 	const float lo_in_max_watt = conf->l_watt_max / v_in;
 	const float lo_in_min_watt = conf->l_watt_min / v_in;
 
 	const float lo_in_max = utils_min_abs(lo_in_max_watt, lo_in_max_batt);
+	const float lo_in_min = utils_min_abs(lo_in_min_watt, lo_in_min_batt);
 	//const float lo_in_min = lo_in_min_watt;
 
 	conf->lo_in_current_max = utils_min_abs(conf->l_in_current_max, lo_in_max);
-	conf->lo_in_current_min = utils_min_abs(conf->l_in_current_min, lo_in_min_watt);
+	conf->lo_in_current_min = utils_min_abs(conf->l_in_current_min, lo_in_min);
 
 	// Maximum current right now
 	float duty_abs = fabsf(mc_interface_get_duty_cycle_now());
@@ -1465,7 +1511,6 @@ static void update_override_limits(volatile mc_configuration *conf) {
 
 	if (duty_abs > 0.001) {
 		conf->lo_current_motor_max_now = utils_min_abs(conf->lo_current_max, conf->lo_in_current_max / duty_abs);
-		//conf->lo_current_motor_min_now = utils_min_abs(conf->lo_current_min, conf->lo_in_current_min / duty_abs);
 	} else {
 		conf->lo_current_motor_max_now = conf->lo_current_max;
 	}

@@ -601,11 +601,10 @@ void mcpwm_foc_set_current(float current) {
 	}
 	
 	// truncate by the higher value because it also could mean accelerate reverse
-	if(m_conf->l_current_max > -m_conf->l_current_min){
-		utils_truncate_number(&current, -m_conf->l_current_max, m_conf->l_current_max);
-	}else{
-		utils_truncate_number(&current, m_conf->l_current_min, -m_conf->l_current_min);
-	}
+	float max_c = utils_max_abs(m_conf->l_current_min, m_conf->l_current_max);
+	
+	utils_truncate_number(&current, -max_c, max_c);
+	
 
 	m_control_mode = CONTROL_MODE_CURRENT;
 	m_iq_set = current;
@@ -793,7 +792,7 @@ float mcpwm_foc_get_abs_motor_current(void) {
 float mcpwm_foc_get_abs_motor_voltage(void) {
 	const float vd_tmp = m_motor_state.vd;
 	const float vq_tmp = m_motor_state.vq;
-	return sqrtf(vd_tmp * vd_tmp + vq_tmp * vq_tmp);
+	return sqrtf(SQ(vd_tmp) + SQ(vq_tmp));
 }
 
 /**
@@ -1621,11 +1620,6 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 	}
 #endif
 
-
-
-
-
-
 	float ia = ADC_curr_norm_value[0] * FAC_CURRENT;
 	float ib = ADC_curr_norm_value[1] * FAC_CURRENT;
 //	float ic = -(ia + ib);
@@ -1893,7 +1887,7 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 		float Vb = ADC_VOLTS(ADC_IND_SENS3) * ((VIN_R1 + VIN_R2) / VIN_R2);
 		float Vc = ADC_VOLTS(ADC_IND_SENS2) * ((VIN_R1 + VIN_R2) / VIN_R2);
 #endif
-		
+
 		// Full Clarke transform (no balanced voltages)
 		m_motor_state.v_alpha = (2.0 / 3.0) * Va - (1.0 / 3.0) * Vb - (1.0 / 3.0) * Vc;
 		m_motor_state.v_beta = ONE_BY_SQRT3 * Vb - ONE_BY_SQRT3 * Vc;
@@ -1904,10 +1898,10 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 		// Park transform
 		float vd_tmp = c * m_motor_state.v_alpha + s * m_motor_state.v_beta;
 		float vq_tmp = c * m_motor_state.v_beta  - s * m_motor_state.v_alpha;
-		
-		if (UTILS_IS_NAN(m_motor_state.vd)) m_motor_state.vd = 0.0;
-		if (UTILS_IS_NAN(m_motor_state.vq)) m_motor_state.vq = 0.0;
-		
+
+		UTILS_NAN_ZERO(m_motor_state.vd);
+		UTILS_NAN_ZERO(m_motor_state.vq);
+
 		UTILS_LP_FAST(m_motor_state.vd, vd_tmp, 0.2);
 		UTILS_LP_FAST(m_motor_state.vq, vq_tmp, 0.2);
 
@@ -1946,7 +1940,6 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 			m_motor_state.phase = m_phase_now_observer;
 			break;
 		}
-
 	}
 
 	// Calculate duty cycle
@@ -2088,8 +2081,8 @@ static THD_FUNCTION(timer_thread, arg) {
 			const volatile float id_tmp = m_motor_state.id;
 			const volatile float iq_tmp = m_motor_state.iq;
 
-			m_samples.avg_current_tot += sqrtf(id_tmp * id_tmp + iq_tmp * iq_tmp);
-			m_samples.avg_voltage_tot += sqrtf(vd_tmp * vd_tmp + vq_tmp * vq_tmp);
+			m_samples.avg_current_tot += sqrtf(SQ(id_tmp) + SQ(iq_tmp));
+			m_samples.avg_voltage_tot += sqrtf(SQ(vd_tmp) + SQ(vq_tmp));
 			m_samples.sample_num++;
 		}
 
@@ -2137,10 +2130,8 @@ static void do_dc_cal(void) {
 void observer_update(float v_alpha, float v_beta, float i_alpha, float i_beta,
 		float dt, volatile float *x1, volatile float *x2, volatile float *phase) {
 
-	//const float L = (3.0 / 2.0) * m_conf->foc_motor_l;
 	const float L = 1.5 * m_conf->foc_motor_l;
 	//const float lambda = m_conf->foc_motor_flux_linkage;
-	//float R = (3.0 / 2.0) * m_conf->foc_motor_r;
 	float R = 1.5 * m_conf->foc_motor_r;
 
 	// Saturation compensation
@@ -2148,55 +2139,40 @@ void observer_update(float v_alpha, float v_beta, float i_alpha, float i_beta,
 	R -= R * sign * m_conf->foc_sat_comp * (m_motor_state.i_abs_filter / m_conf->l_current_max);
 
 	// Temperature compensation
-	if (m_conf->foc_temp_comp) {
-		const float t = mc_interface_temp_motor_filtered();
-		if(t > -5.0){
-			R += R * 0.00386 * (t - m_conf->foc_temp_comp_base_temp);
-		}
+	const float t = mc_interface_temp_motor_filtered();
+	if (m_conf->foc_temp_comp && t > -5.0) {
+		R += R * 0.00386 * (t - m_conf->foc_temp_comp_base_temp);
 	}
 
 	const float L_ia = L * i_alpha;
 	const float L_ib = L * i_beta;
-	//const float R_ia = R * i_alpha;
-	//const float R_ib = R * i_beta;
-	//const float lambda_2 = SQ(lambda);
+	const float m_R_ia_p_v_alpha = -R * i_alpha + v_alpha;
+	const float m_R_ib_p_v_beta = -R * i_beta + v_beta;
+	const float lambda_2 = SQ(m_conf->foc_motor_flux_linkage);
 	const float gamma_half = m_gamma_now * 0.5;
 
 	// Original
-	//float err = lambda_2 - (SQ(*x1 - L_ia) + SQ(*x2 - L_ib));
-	float err = SQ(m_conf->foc_motor_flux_linkage) - (SQ(*x1 - L_ia) + SQ(*x2 - L_ib));
-	
-	//float x1_dot = -R_ia + v_alpha + gamma_half * (*x1 - L_ia) * err;
-	//float x2_dot = -R_ib + v_beta + gamma_half * (*x2 - L_ib) * err;
-	//*x1 += x1_dot * dt;
-	*x1 += (-(R * i_alpha) + v_alpha + gamma_half * (*x1 - L_ia) * err) * dt;
-	//*x2 += x2_dot * dt;
-	*x2 += (-(R * i_beta) + v_beta + gamma_half * (*x2 - L_ib) * err) * dt;
-	
-	//const float L_ia = L * i_alpha;
-	//const float L_ib = L * i_beta;
-	//const float gamma_half = m_gamma_now * 0.5;
-	
-	// float err = SQ(m_conf->foc_motor_flux_linkage) - (SQ(*x1 - L_ia) + SQ(*x2 - L_ib));
-	
-	//*x1 += (-(R * i_alpha) + v_alpha + gamma_half * (*x1 - L_ia) * err) * dt;
-	//*x2 += (-(R * i_beta) + v_beta + gamma_half * (*x2 - L_ib) * err) * dt;
+//	float err = lambda_2 - (SQ(*x1 - L_ia) + SQ(*x2 - L_ib));
+//	float x1_dot = -R_ia + v_alpha + gamma_half * (*x1 - L_ia) * err;
+//	float x2_dot = -R_ib + v_beta + gamma_half * (*x2 - L_ib) * err;
+//	*x1 += x1_dot * dt;
+//	*x2 += x2_dot * dt;
 
 	// Iterative with some trial and error
-//	const int iterations = 6;
-//	const float dt_iteration = dt / (float)iterations;
-//	for (int i = 0;i < iterations;i++) {
-//		float err = lambda_2 - (SQ(*x1 - L_ia) + SQ(*x2 - L_ib));
-//		float gamma_tmp = gamma_half;
-//		if (utils_truncate_number_abs(&err, lambda_2 * 0.2)) {
-//			gamma_tmp *= 10.0;
-//		}
-//		float x1_dot = -R_ia + v_alpha + gamma_tmp * (*x1 - L_ia) * err;
-//		float x2_dot = -R_ib + v_beta + gamma_tmp * (*x2 - L_ib) * err;
-//
-//		*x1 += x1_dot * dt_iteration;
-//		*x2 += x2_dot * dt_iteration;
-//	}
+	//const int iterations = 6;
+	const float dt_iteration = dt / 6.0;
+	for (int i = 0;i < 6;i++) {
+		float err = lambda_2 - (SQ(*x1 - L_ia) + SQ(*x2 - L_ib));
+		float gamma_tmp = gamma_half;
+		if (utils_truncate_number_abs(&err, lambda_2 * 0.2)) {
+			gamma_tmp *= 10.0;
+		}
+		const float x1_dot = m_R_ia_p_v_alpha + gamma_tmp * (*x1 - L_ia) * err;
+		const float x2_dot = m_R_ib_p_v_beta + gamma_tmp * (*x2 - L_ib) * err;
+
+		*x1 += x1_dot * dt_iteration;
+		*x2 += x2_dot * dt_iteration;
+	}
 
 	// Same as above, but without iterations.
 //	float err = lambda_2 - (SQ(*x1 - L_ia) + SQ(*x2 - L_ib));
@@ -2209,26 +2185,19 @@ void observer_update(float v_alpha, float v_beta, float i_alpha, float i_beta,
 //	*x1 += x1_dot * dt;
 //	*x2 += x2_dot * dt;
 
-	if (UTILS_IS_NAN(*x1)) {
-		*x1 = 0.0;
-	}
-
-	if (UTILS_IS_NAN(*x2)) {
-		*x2 = 0.0;
-	}
+	UTILS_NAN_ZERO(*x1);
+	UTILS_NAN_ZERO(*x2);
 
 	*phase = utils_fast_atan2(*x2 - L_ib, *x1 - L_ia);
 }
 
 static void pll_run(float phase, float dt, volatile float *phase_var,
 		volatile float *speed_var) {
-	if (UTILS_IS_NAN(*phase_var)) *phase_var = 0.0;
+	UTILS_NAN_ZERO(*phase_var);
 	float delta_theta = phase - *phase_var;
 	utils_norm_angle_rad(&delta_theta);
-
-	if (UTILS_IS_NAN(*speed_var)) *speed_var = 0.0;
+	UTILS_NAN_ZERO(*speed_var);
 	*phase_var += (*speed_var + m_conf->foc_pll_kp * delta_theta) * dt;
-
 	utils_norm_angle_rad((float*)phase_var);
 	*speed_var += m_conf->foc_pll_ki * delta_theta * dt;
 }
@@ -2278,29 +2247,38 @@ static void control_current(volatile motor_state_t *state_m, float dt) {
 
 	state_m->id = c * state_m->i_alpha + s * state_m->i_beta;
 	state_m->iq = c * state_m->i_beta  - s * state_m->i_alpha;
-	UTILS_LP_FAST(state_m->id_filter, state_m->id, MCPWM_FOC_I_FILTER_CONST);
-	UTILS_LP_FAST(state_m->iq_filter, state_m->iq, MCPWM_FOC_I_FILTER_CONST);
+	UTILS_LP_FAST(state_m->id_filter, state_m->id, m_conf->foc_current_filter_const);
+	UTILS_LP_FAST(state_m->iq_filter, state_m->iq, m_conf->foc_current_filter_const);
 
 	float Ierr_d = state_m->id_target - state_m->id;
 	float Ierr_q = state_m->iq_target - state_m->iq;
 
 	state_m->vd = state_m->vd_int + Ierr_d * m_conf->foc_current_kp;
 	state_m->vq = state_m->vq_int + Ierr_q * m_conf->foc_current_kp;
-	state_m->vd_int += Ierr_d * (m_conf->foc_current_ki * dt);
-	state_m->vq_int += Ierr_q * (m_conf->foc_current_ki * dt);
+
+	// Temperature compensation
+	const float t = mc_interface_temp_motor_filtered();
+	float ki = m_conf->foc_current_ki;
+	if (m_conf->foc_temp_comp && t > -5.0) {
+		ki += ki * 0.00386 * (t - m_conf->foc_temp_comp_base_temp);
+	}
+
+	state_m->vd_int += Ierr_d * (ki * dt);
+	state_m->vq_int += Ierr_q * (ki * dt);
+
+	const float two_third_v_bus = (2.0 / 3.0) * state_m->v_bus;	
+	const float max_duty_v_bus = two_third_v_bus * max_duty * SQRT3_BY_2;
 
 	// Saturation
-	utils_saturate_vector_2d((float*)&state_m->vd, (float*)&state_m->vq,
-			(2.0 / 3.0) * max_duty * SQRT3_BY_2 * state_m->v_bus);
-
-	state_m->mod_d = state_m->vd / ((2.0 / 3.0) * state_m->v_bus);
-	state_m->mod_q = state_m->vq / ((2.0 / 3.0) * state_m->v_bus);
+	utils_saturate_vector_2d((float*)&state_m->vd, (float*)&state_m->vq, max_duty_v_bus);
+	
+	state_m->mod_d = state_m->vd / two_third_v_bus;
+	state_m->mod_q = state_m->vq / two_third_v_bus;
 
 	// Windup protection
-//	utils_saturate_vector_2d((float*)&state_m->vd_int, (float*)&state_m->vq_int,
-//			(2.0 / 3.0) * max_duty * SQRT3_BY_2 * state_m->v_bus);
-	utils_truncate_number_abs((float*)&state_m->vd_int, (2.0 / 3.0) * max_duty * SQRT3_BY_2 * state_m->v_bus);
-	utils_truncate_number_abs((float*)&state_m->vq_int, (2.0 / 3.0) * max_duty * SQRT3_BY_2 * state_m->v_bus);
+//	utils_saturate_vector_2d((float*)&state_m->vd_int, (float*)&state_m->vq_int, max_duty_v_bus);
+	utils_truncate_number_abs((float*)&state_m->vd_int, max_duty_v_bus);
+	utils_truncate_number_abs((float*)&state_m->vq_int, max_duty_v_bus);
 
 	// TODO: Have a look at this?
 	state_m->i_bus = state_m->mod_d * state_m->id + state_m->mod_q * state_m->iq;
@@ -2323,8 +2301,8 @@ static void control_current(volatile motor_state_t *state_m, float dt) {
 	const float mod_beta_comp = mod_beta_filter_sgn * mod_comp_fact;
 
 	// Apply compensation here so that 0 duty cycle has no glitches.
-	state_m->v_alpha = (mod_alpha - mod_alpha_comp) * (2.0 / 3.0) * state_m->v_bus;
-	state_m->v_beta = (mod_beta - mod_beta_comp) * (2.0 / 3.0) * state_m->v_bus;
+	state_m->v_alpha = (mod_alpha - mod_alpha_comp) * two_third_v_bus;
+	state_m->v_beta = (mod_beta - mod_beta_comp) * two_third_v_bus;
 
 	// Set output (HW Dependent)
 	uint32_t duty1, duty2, duty3, top;
@@ -2510,8 +2488,15 @@ static void run_pid_control_pos(float angle_now, float angle_set, float dt) {
 		dt_int = 0.0;
 	}
 
+	// Filter D
+	static float d_filter = 0.0;
+	UTILS_LP_FAST(d_filter, d_term, m_conf->p_pid_kd_filter);
+	d_term = d_filter;
+
+
 	// I-term wind-up protection
-	utils_truncate_number(&i_term, -1.0, 1.0);
+	utils_truncate_number_abs(&p_term, 1.0);
+	utils_truncate_number_abs(&i_term, 1.0 - fabsf(p_term));
 
 	// Store previous error
 	prev_error = error;
@@ -2535,13 +2520,13 @@ static void run_pid_control_pos(float angle_now, float angle_set, float dt) {
 static void run_pid_control_speed(float dt) {
 	static float i_term = 0.0;
 	static float prev_error = 0.0;
-	static float d_filtered = 0.0;
-	
+	static float d_filter = 0.0;
 
 	// PID is off. Return.
 	if (m_control_mode != CONTROL_MODE_SPEED) {
 		i_term = 0.0;
 		prev_error = 0.0;
+		d_filter = 0.0;
 		return;
 	}
 
@@ -2552,7 +2537,7 @@ static void run_pid_control_speed(float dt) {
 	if (fabsf(m_speed_pid_set_rpm) < m_conf->s_pid_min_erpm) {
 		i_term = 0.0;
 		prev_error = error;
-		d_filtered = 0.0;
+		d_filter = 0.0;
 		m_iq_set = 0.0;
 		return;
 	}
@@ -2562,15 +2547,15 @@ static void run_pid_control_speed(float dt) {
 	i_term += error * (m_conf->s_pid_ki * dt) * 0.025; // 1.0 / 40.0
 	float d_term = (error - prev_error) * (m_conf->s_pid_kd / dt) * 0.025; // 1.0 / 40.0
 	
+	// Filter D
+	UTILS_LP_FAST(d_filter, d_term, m_conf->s_pid_kd_filter);
+	d_term = d_filter;
+
 	// I-term wind-up protection
 	utils_truncate_number(&i_term, -1.0, 1.0);
 
 	// Store previous error
 	prev_error = error;
-
-	// Some d_term filtering
-	UTILS_LP_FAST(d_filtered, d_term, 0.1);
-	d_term = d_filtered;
 
 	// Calculate output
 	float output = p_term + i_term + d_term;
@@ -2582,7 +2567,7 @@ static void run_pid_control_speed(float dt) {
 			output = 0.0;
 			i_term = 0.0;
 			prev_error = 0;
-			d_filtered = 0.0;
+			d_filter = 0.0;
 		}
 	}
 

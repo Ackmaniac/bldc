@@ -42,7 +42,6 @@
 #include "ws2811.h"
 #include "led_external.h"
 #include "encoder.h"
-#include "servo.h"
 #include "servo_simple.h"
 #include "utils.h"
 #include "nrf_driver.h"
@@ -51,7 +50,6 @@
 
 /*
  * Timers used:
- * TIM7: servo
  * TIM1: mcpwm
  * TIM2: mcpwm
  * TIM12: mcpwm
@@ -204,6 +202,10 @@ int main(void) {
 	commands_init();
 	comm_usb_init();
 
+#if CAN_ENABLE
+	comm_can_init();
+#endif
+
 	app_configuration appconf;
 	conf_general_read_app_configuration(&appconf);
 	app_set_configuration(&appconf);
@@ -227,10 +229,6 @@ int main(void) {
 	timeout_init();
 	timeout_configure(appconf.timeout_msec, appconf.timeout_brake_current);
 
-#if CAN_ENABLE
-	comm_can_init();
-#endif
-
 #if WS2811_ENABLE
 	ws2811_init();
 #if !WS2811_TEST
@@ -239,11 +237,7 @@ int main(void) {
 #endif
 
 #if SERVO_OUT_ENABLE
-#if SERVO_OUT_SIMPLE
 	servo_simple_init();
-#else
-	servo_init();
-#endif
 #endif
 
 	// Threads

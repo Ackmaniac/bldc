@@ -254,6 +254,17 @@ static THD_FUNCTION(output_thread, arg) {
 
 		if (chuck_d.bt_c && chuck_d.bt_z) {
 			led_external_set_state(LED_EXT_BATT);
+			// Send 0 current to other controllers so thatt the timeout doesn't fire
+			if (config.multi_esc) {
+
+				for (int i = 0;i < CAN_STATUS_MSGS_TO_STORE;i++) {
+					can_status_msg *msg = comm_can_get_status_msg_index(i);
+
+					if (msg->id >= 0 && UTILS_AGE_S(msg->rx_time) < MAX_CAN_AGE) {
+						comm_can_set_current(msg->id, 0.0);
+					}
+				}
+			}
 			continue;
 		}
 
@@ -376,6 +387,19 @@ static THD_FUNCTION(output_thread, arg) {
 					if ((is_reverse && pid_rpm > 0.0) || (!is_reverse && pid_rpm < 0.0)) {
 						if (fabsf(pid_rpm) > mcconf->s_pid_min_erpm) {
 							// Abort if the speed is too high in the opposite direction
+							
+							// Send 0 current to other controllers so thatt the timeout doesn't fire
+                			if (config.multi_esc) {
+
+                				for (int i = 0;i < CAN_STATUS_MSGS_TO_STORE;i++) {
+                					can_status_msg *msg = comm_can_get_status_msg_index(i);
+
+                					if (msg->id >= 0 && UTILS_AGE_S(msg->rx_time) < MAX_CAN_AGE) {
+                						comm_can_set_current(msg->id, 0.0);
+                					}
+                				}
+                			}
+							
 							continue;
 						} else {
 							pid_rpm = 0.0;

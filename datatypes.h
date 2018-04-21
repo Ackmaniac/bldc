@@ -137,6 +137,13 @@ typedef enum {
 	DEBUG_SAMPLING_SEND_LAST_SAMPLES
 } debug_sampling_mode;
 
+typedef enum {
+	CAN_BAUD_125K = 0,
+	CAN_BAUD_250K,
+	CAN_BAUD_500K,
+	CAN_BAUD_1M
+} CAN_BAUD;
+
 typedef struct {
 	// Switching and drive
 	mc_pwm_mode pwm_mode;
@@ -163,6 +170,7 @@ typedef struct {
 	float l_temp_fet_end;
 	float l_temp_motor_start;
 	float l_temp_motor_end;
+	float l_temp_accel_dec;
 	float l_min_duty;
 	float l_max_duty;
 	float l_watt_max;
@@ -215,16 +223,19 @@ typedef struct {
 	float foc_sat_comp;
 	bool foc_temp_comp;
 	float foc_temp_comp_base_temp;
+	float foc_current_filter_const;
 	// Speed PID
 	float s_pid_kp;
 	float s_pid_ki;
 	float s_pid_kd;
+	float s_pid_kd_filter;
 	float s_pid_min_erpm;
 	bool s_pid_allow_braking;
 	// Pos PID
 	float p_pid_kp;
 	float p_pid_ki;
 	float p_pid_kd;
+	float p_pid_kd_filter;
 	float p_pid_ang_div;
 	// Current controller
 	float cc_startup_boost_duty;
@@ -317,7 +328,10 @@ typedef enum {
 	ADC_CTRL_TYPE_CURRENT_NOREV_BRAKE_ADC,
 	ADC_CTRL_TYPE_DUTY,
 	ADC_CTRL_TYPE_DUTY_REV_CENTER,
-	ADC_CTRL_TYPE_DUTY_REV_BUTTON
+	ADC_CTRL_TYPE_DUTY_REV_BUTTON,
+	ADC_CTRL_TYPE_PID,
+	ADC_CTRL_TYPE_PID_REV_CENTER,
+	ADC_CTRL_TYPE_PID_REV_BUTTON
 } adc_control_type;
 
 typedef struct {
@@ -380,7 +394,8 @@ typedef enum {
 	NRF_POWER_M18DBM = 0,
 	NRF_POWER_M12DBM,
 	NRF_POWER_M6DBM,
-	NRF_POWER_0DBM
+	NRF_POWER_0DBM,
+	NRF_POWER_OFF
 } NRF_POWER;
 
 typedef enum {
@@ -432,6 +447,7 @@ typedef struct {
 	float timeout_brake_current;
 	bool send_can_status;
 	uint32_t send_can_status_rate_hz;
+	CAN_BAUD can_baud_rate;
 
 	// Application to use
 	app_use app_to_use;
@@ -517,6 +533,8 @@ typedef enum {
 	CAN_PACKET_STATUS,
 	CAN_PACKET_SET_CURRENT_REL,
 	CAN_PACKET_SET_CURRENT_BRAKE_REL,
+	CAN_PACKET_SET_CURRENT_HANDBRAKE,
+	CAN_PACKET_SET_CURRENT_HANDBRAKE_REL,
 	CAN_PACKET_TIMEOUT_FIRE
 } CAN_PACKET_ID;
 

@@ -667,13 +667,11 @@ void mcpwm_set_current(float current) {
 		stop_pwm_ll();
 		return;
 	}
-
+	
 	// truncate by the higher value because it also could mean accelerate reverse
-	if(conf->l_current_max > -conf->l_current_min){
-		utils_truncate_number(&current, -conf->l_current_max, conf->l_current_max);
-	}else{
-		utils_truncate_number(&current, conf->l_current_min, -conf->l_current_min);
-	}
+	float max_c = utils_max_abs(conf->l_current_min, conf->l_current_max);
+	
+	utils_truncate_number(&current, -max_c, max_c);
 
 	control_mode = CONTROL_MODE_CURRENT;
 	current_set = current;
@@ -1145,12 +1143,12 @@ static void set_duty_cycle_hw(float dutyCycle) {
 static void run_pid_control_speed(void) {
 	static float i_term = 0;
 	static float prev_error = 0;
-	static float d_filtered = 0.0;
+	static float d_filter = 0.0;
 		// PID is off. Return.
 	if (control_mode != CONTROL_MODE_SPEED) {
 		i_term = 0.0;
 		prev_error = 0.0;
-		d_filtered = 0.0;
+		d_filter = 0.0;
 		return;
 	}
 
@@ -1161,27 +1159,25 @@ static void run_pid_control_speed(void) {
 	if (fabsf(speed_pid_set_rpm) <conf->s_pid_min_erpm) {
 		i_term = 0.0;
 		prev_error = error;
-		d_filtered = 0.0;
+		d_filter = 0.0;
 		current_set = 0.0;
 		return;
 	}
 
-	static float scale = 1.0 / 40.0;
-
 	// Compute parameters
-	float p_term = error * conf->s_pid_kp * scale;
-	i_term += error * (conf->s_pid_ki * MCPWM_PID_TIME_K) * scale;
-	float d_term = (error - prev_error) * (conf->s_pid_kd / MCPWM_PID_TIME_K) * scale;
+	float p_term = error * conf->s_pid_kp * 0.025; // 1.0 / 40.0
+	i_term += error * (conf->s_pid_ki * MCPWM_PID_TIME_K) * 0.025; // 1.0 / 40.0
+	float d_term = (error - prev_error) * (conf->s_pid_kd / MCPWM_PID_TIME_K) * 0.025; // 1.0 / 40.0
+
+	// Filter D
+	UTILS_LP_FAST(d_filter, d_term, conf->p_pid_kd_filter);
+	d_term = d_filter;
 
 	// I-term wind-up protection
 	utils_truncate_number(&i_term, -1.0, 1.0);
 
 	// Store previous error
 	prev_error = error;
-
-	// Some d_term filtering
-	UTILS_LP_FAST(d_filtered, d_term, 0.1);
-	d_term = d_filtered;
 
 	// Calculate output
 	float output = p_term + i_term + d_term;
@@ -1193,7 +1189,7 @@ static void run_pid_control_speed(void) {
 			output = 0.0;
 			i_term = 0.0;
 			prev_error = 0;
-			d_filtered = 0.0;
+			d_filter = 0.0;
 		}
 
 	}
@@ -1225,6 +1221,11 @@ static void run_pid_control_pos(float dt) {
 	p_term = error * conf->p_pid_kp;
 	i_term += error * (conf->p_pid_ki * dt);
 	d_term = (error - prev_error) * (conf->p_pid_kd / dt);
+
+	// Filter D
+	static float d_filter = 0.0;
+	UTILS_LP_FAST(d_filter, d_term, conf->p_pid_kd_filter);
+	d_term = d_filter;
 
 	// I-term wind-up protection
 	utils_truncate_number(&i_term, -1.0, 1.0);
